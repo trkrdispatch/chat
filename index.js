@@ -5,11 +5,14 @@ const io = require('socket.io')(http);
 const path = require('path');
 const { createClient } = require('@clickhouse/client');
 const { OpenAI } = require('openai');
+const config = require('./config');
+const { ClickHouse } = require('clickhouse');
+const { promisify } = require('util');
 require('dotenv').config();
 
-// Initialize OpenAI API client
+// Initialize OpenAI API client with secure config
 const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
+  apiKey: config.getSecret('openaiApiKey'),
 });
 
 // Track connected users
@@ -30,9 +33,9 @@ const clickhouse = createClient({
     password: 'password123',
     database: 'default',
     compression: false,
-    request_timeout: 60000,  // Increase timeout
+    request_timeout: 60000,
     clickhouse_settings: {
-        allow_experimental_object_type: 1  // Allow object types
+        allow_experimental_object_type: 1
     }
 });
 
@@ -122,6 +125,13 @@ async function generateAIResponse(message, username) {
     try {
         console.log('Generating AI response for message:', message);
         
+        // Check if we have a valid API key (not the placeholder)
+        const apiKey = config.getSecret('openaiApiKey');
+        if (!apiKey || apiKey === 'your_openai_api_key_here') {
+            console.error('Invalid OpenAI API key. Please replace the placeholder in .env with a valid key.');
+            return "I can't respond right now. The OpenAI API key hasn't been configured. Please check the .env file and replace the placeholder with a valid API key.";
+        }
+        
         const completion = await openai.chat.completions.create({
             messages: [
                 { 
@@ -133,13 +143,19 @@ async function generateAIResponse(message, username) {
                     content: `User "${username}" says: ${message}` 
                 }
             ],
-            model: "gpt-3.5-turbo",
-            max_tokens: 150,
+            model: config.openai.model,
+            max_tokens: config.openai.maxTokens,
         });
         
         return completion.choices[0].message.content.trim();
     } catch (error) {
         console.error('Error generating AI response:', error);
+        
+        // Check for specific API key errors
+        if (error.message && (error.message.includes('API key') || error.message.includes('authentication'))) {
+            return "Sorry, there's an issue with the OpenAI API key. Please make sure you've replaced the placeholder in the .env file with a valid API key.";
+        }
+        
         return "Sorry, I'm having trouble processing your request right now.";
     }
 }

@@ -1,0 +1,60 @@
+version: '3.8'
+
+services:
+  node-app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: always
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+      - CLICKHOUSE_HOST=clickhouse
+      # In production, do not define the API key here
+      # Instead, use Docker secrets or environment variables at runtime
+      # - OPENAI_API_KEY=your-key-here # NEVER DO THIS
+    secrets:
+      - openai_api_key
+    depends_on:
+      - clickhouse
+    networks:
+      - app-network
+    command: >
+      sh -c "export OPENAI_API_KEY=$(cat /run/secrets/openai_api_key) && node index.js"
+
+  clickhouse:
+    image: clickhouse/clickhouse-server:latest
+    restart: always
+    ports:
+      - "8123:8123"
+      - "9000:9000"
+    environment:
+      - CLICKHOUSE_DB=default
+      - CLICKHOUSE_USER=default
+      - CLICKHOUSE_PASSWORD=password123
+    volumes:
+      - clickhouse-data:/var/lib/clickhouse
+    networks:
+      - app-network
+
+volumes:
+  clickhouse-data:
+
+networks:
+  app-network:
+    driver: bridge
+
+secrets:
+  openai_api_key:
+    # In a real deployment, you'd use external secrets from a secret manager
+    # external: true
+    # or a file that's not in version control:
+    file: ./production-secrets/openai_api_key.txt # This file should NOT be committed to git
+
+# Instructions for deployment:
+# 1. Create a directory: mkdir -p ./production-secrets
+# 2. Add your API key: echo "your-actual-api-key" > ./production-secrets/openai_api_key.txt
+# 3. Ensure this file is NOT in version control (.gitignore)
+# 4. Deploy with: docker-compose -f docker-compose.production.yml up -d 
