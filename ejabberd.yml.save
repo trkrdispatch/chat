@@ -1,0 +1,3 @@
+sudo mv ejabberd.yml /etc/ejabberd/ejabberd.yml
+sudo chown $USER /etc/ejabberd/ejabberd.yml
+
