@@ -36,13 +36,51 @@
         }
         .message {
             margin-bottom: 10px;
-            padding: 5px;
-            border-radius: 5px;
+            padding: 10px;
+            border-radius: 15px;
+            max-width: 70%;
+            clear: both;
+            position: relative;
+            word-wrap: break-word;
+        }
+        .user-info {
+            font-weight: bold;
+            font-size: 0.8em;
+            margin-bottom: 5px;
+            color: #666;
+        }
+        .message-content {
+            display: inline-block;
+        }
+        .timestamp {
+            font-size: 0.7em;
+            color: #999;
+            margin-top: 5px;
+            display: block;
+        }
+        .message-left {
+            float: left;
+            background-color: #f1f0f0;
+            color: #333;
+            text-align: left;
+            border-top-left-radius: 5px;
+        }
+        .message-right {
+            float: right;
+            background-color: #dcf8c6;
+            color: #000;
+            text-align: right;
+            border-top-right-radius: 5px;
         }
         .system-message {
             background-color: #f0f0f0;
             text-align: center;
             font-style: italic;
+            margin: 10px auto;
+            padding: 5px 10px;
+            border-radius: 10px;
+            max-width: 80%;
+            clear: both;
         }
         input[type="text"] {
             padding: 8px;
@@ -82,6 +120,16 @@
         .refresh-button {
             margin-bottom: 10px;
         }
+        #current-user {
+            position: fixed;
+            top: 10px;
+            right: 20px;
+            background-color: #4CAF50;
+            color: white;
+            padding: 5px 10px;
+            border-radius: 15px;
+            font-size: 0.9em;
+        }
     </style>
 </head>
 <body>
@@ -92,6 +140,7 @@
     </div>
 
     <div id="chat-interface">
+        <div id="current-user"></div>
         <div class="container">
             <div class="chat-section">
                 <h2>Chat</h2>
@@ -143,6 +192,7 @@
                 socket.emit('join', username);
                 document.getElementById('join-form').style.display = 'none';
                 document.getElementById('chat-interface').style.display = 'block';
+                document.getElementById('current-user').textContent = `Logged in as: ${username}`;
                 refreshMessages();
             }
         }
@@ -170,6 +220,29 @@
                         `;
                         tbody.appendChild(row);
                     });
+
+                    // Also update the chat messages view
+                    const messagesDiv = document.getElementById('messages');
+                    messagesDiv.innerHTML = ''; // Clear current messages
+                    
+                    // Add messages in chronological order (oldest first)
+                    messages.slice().reverse().forEach(msg => {
+                        const isCurrentUser = msg.username === currentUser;
+                        const messageClass = isCurrentUser ? 'message-right' : 'message-left';
+                        
+                        const messageElement = document.createElement('div');
+                        messageElement.className = `message ${messageClass}`;
+                        
+                        messageElement.innerHTML = `
+                            ${!isCurrentUser ? `<div class="user-info">${msg.username}</div>` : ''}
+                            <div class="message-content">${msg.message}</div>
+                            <span class="timestamp">${new Date(msg.timestamp).toLocaleString()}</span>
+                        `;
+                        
+                        messagesDiv.appendChild(messageElement);
+                    });
+                    
+                    messagesDiv.scrollTop = messagesDiv.scrollHeight;
                 } else {
                     console.error('Messages is not an array:', messages);
                 }
@@ -189,18 +262,37 @@
             }
         }
 
-        function appendMessage(message, type = 'message') {
+        function appendMessage(data, type = 'message') {
+            if (type === 'system-message') {
+                const messagesDiv = document.getElementById('messages');
+                const messageElement = document.createElement('div');
+                messageElement.className = `message ${type}`;
+                messageElement.textContent = data;
+                messagesDiv.appendChild(messageElement);
+                messagesDiv.scrollTop = messagesDiv.scrollHeight;
+                return;
+            }
+            
+            const isCurrentUser = data.username === currentUser;
+            const messageClass = isCurrentUser ? 'message-right' : 'message-left';
+            
             const messagesDiv = document.getElementById('messages');
             const messageElement = document.createElement('div');
-            messageElement.className = `message ${type}`;
-            messageElement.textContent = message;
+            messageElement.className = `message ${messageClass}`;
+            
+            messageElement.innerHTML = `
+                ${!isCurrentUser ? `<div class="user-info">${data.username}</div>` : ''}
+                <div class="message-content">${data.message}</div>
+                <span class="timestamp">${new Date(data.timestamp).toLocaleString()}</span>
+            `;
+            
             messagesDiv.appendChild(messageElement);
             messagesDiv.scrollTop = messagesDiv.scrollHeight;
         }
 
         socket.on('message', (data) => {
             console.log('Received message:', data);
-            appendMessage(`${data.username}: ${data.message}`);
+            appendMessage(data);
             refreshMessages();
         });
 
