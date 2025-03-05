@@ -149,28 +149,41 @@
 
         async function refreshMessages() {
             try {
+                console.log('Fetching messages...');
                 const response = await fetch('/messages');
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
                 const messages = await response.json();
+                console.log('Received messages:', messages);
+                
                 const tbody = document.getElementById('messages-body');
                 tbody.innerHTML = '';
                 
-                messages.forEach(msg => {
-                    const row = document.createElement('tr');
-                    row.innerHTML = `
-                        <td>${new Date(msg.timestamp).toLocaleString()}</td>
-                        <td>${msg.username}</td>
-                        <td>${msg.message}</td>
-                    `;
-                    tbody.appendChild(row);
-                });
+                if (Array.isArray(messages)) {
+                    messages.forEach(msg => {
+                        const row = document.createElement('tr');
+                        row.innerHTML = `
+                            <td>${new Date(msg.timestamp).toLocaleString()}</td>
+                            <td>${msg.username}</td>
+                            <td>${msg.message}</td>
+                        `;
+                        tbody.appendChild(row);
+                    });
+                } else {
+                    console.error('Messages is not an array:', messages);
+                }
             } catch (error) {
                 console.error('Error fetching messages:', error);
+                const tbody = document.getElementById('messages-body');
+                tbody.innerHTML = '<tr><td colspan="3">Error loading messages. Please try again.</td></tr>';
             }
         }
 
         function sendMessage() {
             const message = document.getElementById('message').value;
             if (message) {
+                console.log('Sending message:', message);
                 socket.emit('send_message', message);
                 document.getElementById('message').value = '';
             }
@@ -186,7 +199,13 @@
         }
 
         socket.on('message', (data) => {
+            console.log('Received message:', data);
             appendMessage(`${data.username}: ${data.message}`);
+            refreshMessages();
+        });
+
+        socket.on('refresh_messages', () => {
+            console.log('Received refresh_messages event');
             refreshMessages();
         });
 

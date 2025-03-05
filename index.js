@@ -17,7 +17,12 @@ const clickhouse = createClient({
     host: `http://${process.env.CLICKHOUSE_HOST || 'clickhouse'}:8123`,
     username: 'default',
     password: 'password123',
-    database: 'default'
+    database: 'default',
+    compression: false,
+    request_timeout: 60000,  // Increase timeout
+    clickhouse_settings: {
+        allow_experimental_object_type: 1  // Allow object types
+    }
 });
 
 // Initialize ClickHouse table with retry logic
@@ -26,6 +31,16 @@ async function initializeClickHouse(retries = 5, delay = 5000) {
         try {
             console.log(`Attempt ${i + 1} to initialize ClickHouse table...`);
             
+            // First, check if we can connect
+            await clickhouse.ping();
+            console.log('Successfully connected to ClickHouse');
+
+            // Create the database if it doesn't exist
+            await clickhouse.query({
+                query: 'CREATE DATABASE IF NOT EXISTS default'
+            });
+            console.log('Database initialized successfully');
+
             // Create the table
             await clickhouse.query({
                 query: `
@@ -40,12 +55,43 @@ async function initializeClickHouse(retries = 5, delay = 5000) {
                 `
             });
             console.log('ClickHouse table initialized successfully');
+
+            // Verify table exists
+            const tablesStream = await clickhouse.query({
+                query: 'SHOW TABLES FROM default',
+                format: 'JSONEachRow'  // Explicitly set format for this query
+            });
+            const tables = await tablesStream.json();
+            console.log('Available tables:', tables);
+
+            // Test insert and select with direct VALUES
+            await clickhouse.command({
+                query: `
+                    INSERT INTO default.messages (id, username, message)
+                    VALUES (1, 'test', 'Test message')
+                `
+            });
+            console.log('Test message inserted successfully');
+
+            const testResultStream = await clickhouse.query({
+                query: 'SELECT * FROM default.messages WHERE id = 1',
+                format: 'JSONEachRow'  // Explicitly set format for this query
+            });
+            const testResult = await testResultStream.json();
+            console.log('Test query result:', testResult);
+
             return;
         } catch (error) {
             console.error(`Error initializing ClickHouse table (attempt ${i + 1}/${retries}):`, error);
+            console.error('Error details:', {
+                message: error.message,
+                code: error.code,
+                stack: error.stack
+            });
             if (i < retries - 1) {
-                console.log(`Retrying in ${delay/1000} seconds...`);
-                await new Promise(resolve => setTimeout(resolve, delay));
+                const waitTime = delay * (i + 1); // Exponential backoff
+                console.log(`Retrying in ${waitTime/1000} seconds...`);
+                await new Promise(resolve => setTimeout(resolve, waitTime));
             } else {
                 console.error('Failed to initialize ClickHouse table after all retries');
                 throw error;
@@ -68,14 +114,32 @@ app.get('/', (req, res) => {
 // Route for messages data
 app.get('/messages', async (req, res) => {
     try {
-        const result = await clickhouse.query({
-            query: 'SELECT * FROM default.messages ORDER BY timestamp DESC LIMIT 100',
-            format: 'JSONEachRow',
-            compression: false
+        console.log('Fetching messages from ClickHouse...');
+        
+        // First, check if table exists
+        const tablesStream = await clickhouse.query({
+            query: 'SHOW TABLES FROM default',
+            format: 'JSONEachRow'  // Explicitly set format for this query
         });
-        res.json(result);
+        const tables = await tablesStream.json();
+        console.log('Available tables:', tables);
+
+        const resultStream = await clickhouse.query({
+            query: 'SELECT * FROM default.messages ORDER BY timestamp DESC LIMIT 100',
+            format: 'JSONEachRow'  // Explicitly set format for this query
+        });
+        
+        // Parse the stream into JSON
+        const rows = await resultStream.json();
+        console.log('Messages fetched successfully:', rows);
+        res.json(rows);
     } catch (error) {
         console.error('Error fetching messages:', error);
+        console.error('Error details:', {
+            message: error.message,
+            code: error.code,
+            stack: error.stack
+        });
         res.status(500).json({ error: 'Failed to fetch messages' });
     }
 });
@@ -104,19 +168,25 @@ io.on('connection', (socket) => {
                 message: message
             });
 
-            // Store message in ClickHouse
-            await clickhouse.insert({
-                table: 'default.messages',
-                values: [{
-                    id: Math.floor(Math.random() * 1000000),
-                    username: socket.username,
-                    message: message
-                }],
-                format: 'JSONEachRow',
-                compression: false
+            // Store message in ClickHouse with direct VALUES
+            const messageId = Math.floor(Math.random() * 1000000);
+            await clickhouse.command({
+                query: `
+                    INSERT INTO default.messages (id, username, message)
+                    VALUES (${messageId}, '${socket.username.replace(/'/g, "''")}', '${message.replace(/'/g, "''").replace(/\n/g, ' ')}')
+                `
             });
+            console.log('Message insert completed');
 
-            console.log('Message stored successfully');
+            // Verify the message was stored
+            const verifyResultStream = await clickhouse.query({
+                query: 'SELECT * FROM default.messages ORDER BY timestamp DESC LIMIT 1',
+                format: 'JSONEachRow'  // Explicitly set format for this query
+            });
+            const verifyResult = await verifyResultStream.json();
+            console.log('Latest message in database:', verifyResult);
+
+            console.log('Message stored successfully in ClickHouse');
 
             // Broadcast message to all connected clients
             io.emit('message', {
@@ -124,6 +194,9 @@ io.on('connection', (socket) => {
                 message: message,
                 timestamp: new Date()
             });
+
+            // Refresh message history for all clients
+            io.emit('refresh_messages');
         } catch (error) {
             console.error('Error storing message:', error);
             console.error('Error details:', {

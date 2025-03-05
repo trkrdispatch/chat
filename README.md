@@ -1,71 +1,69 @@
-# Real-time Chat Application
+# Chat Application with ClickHouse
 
 A real-time chat application built with Node.js, Socket.IO, and ClickHouse for message storage.
 
 ## Features
 
-- Real-time messaging using Socket.IO
-- Message persistence using ClickHouse
-- Simple username-based chat system
-- Message history with timestamp
-- System notifications for user join/leave events
-- Responsive design
+- Real-time messaging with Socket.IO
+- Message history stored in ClickHouse database
+- Docker containerization for easy deployment
+- Responsive web interface
 
-## Prerequisites
+## Technologies
 
-- Docker
-- Docker Compose
-- Node.js (for local development)
+- Node.js and Express
+- Socket.IO for real-time communication
+- ClickHouse for high-performance message storage
+- Docker and Docker Compose for containerization
+- EJS templates for the frontend
 
 ## Getting Started
 
+### Prerequisites
+
+- Docker and Docker Compose
+- Node.js (for local development)
+
+### Running the Application
+
 1. Clone the repository:
-```bash
-git clone <your-repository-url>
-cd <repository-name>
-```
+   ```
+   git clone https://github.com/yourusername/chat-app-clickhouse.git
+   cd chat-app-clickhouse
+   ```
 
-2. Create a `.env` file in the root directory with the following content:
-```
-PORT=3000
-CLICKHOUSE_HOST=clickhouse
-CLICKHOUSE_PORT=8123
-```
+2. Start the application with Docker Compose:
+   ```
+   docker-compose up --build
+   ```
 
-3. Start the application using Docker Compose:
-```bash
-docker-compose up --build
-```
+3. Access the application at http://localhost:3000
 
-4. Open your browser and navigate to `http://localhost:3000`
+## Project Structure
 
-## Usage
-
-1. Enter a username to join the chat
-2. Start sending messages
-3. Messages are stored in ClickHouse and displayed in the message history
-4. Use the refresh button to update the message history
-
-## Architecture
-
-- Frontend: HTML, CSS, JavaScript with Socket.IO client
-- Backend: Node.js with Express and Socket.IO
-- Database: ClickHouse for message storage
-- Containerization: Docker and Docker Compose
+- `index.js` - Main application file
+- `views/` - EJS templates for the frontend
+- `docker-compose.yml` - Docker Compose configuration
+- `package.json` - Node.js dependencies
 
 ## Development
 
-To run the application locally without Docker:
+For local development:
 
 1. Install dependencies:
-```bash
-npm install
-```
+   ```
+   npm install
+   ```
 
-2. Start the application:
-```bash
-node index.js
-```
+2. Run ClickHouse in Docker:
+   ```
+   docker-compose up clickhouse
+   ```
+
+3. Start the application in development mode:
+   ```
+   npm run dev
+   ```
 
 ## License
 

@@ -1,28 +1,21 @@
-version: '3.8'
-
 services:
   node-app:
-    image: node:18
-    working_dir: /usr/src/app
+    build: .
     volumes:
-      - .:/usr/src/app
-      - /usr/src/app/node_modules
+      - .:/app
     ports:
       - "3000:3000"
-    command: >
-      sh -c "npm install &&
-             node index.js"
+    command: npm start
     depends_on:
       clickhouse:
         condition: service_healthy
     environment:
+      - CLICKHOUSE_HOST=clickhouse
       - NODE_ENV=development
       - PORT=3000
-      - CLICKHOUSE_HOST=clickhouse
-      - CLICKHOUSE_PORT=8123
 
   clickhouse:
-    image: clickhouse/clickhouse-server:latest
+    image: clickhouse/clickhouse-server:23.8
     ports:
       - "8123:8123"
       - "9000:9000"
@@ -32,6 +25,7 @@ services:
       - CLICKHOUSE_USER=default
       - CLICKHOUSE_PASSWORD=password123
       - CLICKHOUSE_DB=default
+      - CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT=1
     ulimits:
       nofile:
         soft: 262144
