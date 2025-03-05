@@ -4,7 +4,18 @@ const http = require('http').createServer(app);
 const io = require('socket.io')(http);
 const path = require('path');
 const { createClient } = require('@clickhouse/client');
+const { OpenAI } = require('openai');
 require('dotenv').config();
+
+// Initialize OpenAI API client
+const openai = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY,
+});
+
+// Track connected users
+const connectedUsers = new Set();
+let aiUserAdded = false;
+const AI_USERNAME = 'AI Assistant';
 
 // Set up Express middleware
 app.use(express.json());
@@ -106,6 +117,63 @@ initializeClickHouse().catch(error => {
     process.exit(1);
 });
 
+// Function to generate response from OpenAI
+async function generateAIResponse(message, username) {
+    try {
+        console.log('Generating AI response for message:', message);
+        
+        const completion = await openai.chat.completions.create({
+            messages: [
+                { 
+                    role: "system", 
+                    content: "You are an AI assistant named 'AI Assistant' in a chat application. Respond in a friendly, helpful, and concise manner. Keep responses to 1-2 short paragraphs maximum." 
+                },
+                { 
+                    role: "user", 
+                    content: `User "${username}" says: ${message}` 
+                }
+            ],
+            model: "gpt-3.5-turbo",
+            max_tokens: 150,
+        });
+        
+        return completion.choices[0].message.content.trim();
+    } catch (error) {
+        console.error('Error generating AI response:', error);
+        return "Sorry, I'm having trouble processing your request right now.";
+    }
+}
+
+// Add AI user to the database if not already added
+async function ensureAIUserExists() {
+    if (aiUserAdded) return;
+    
+    try {
+        // Check if AI user already exists
+        const aiCheckStream = await clickhouse.query({
+            query: `SELECT * FROM default.messages WHERE username = '${AI_USERNAME}' LIMIT 1`,
+            format: 'JSONEachRow'
+        });
+        const aiCheck = await aiCheckStream.json();
+        
+        if (aiCheck.length === 0) {
+            // Add AI user with a welcome message
+            const messageId = Math.floor(Math.random() * 1000000);
+            await clickhouse.command({
+                query: `
+                    INSERT INTO default.messages (id, username, message)
+                    VALUES (${messageId}, '${AI_USERNAME}', 'Hello everyone! I am the AI Assistant. I can respond to your messages when asked directly or when you are the only one in the chat.')
+                `
+            });
+            console.log('AI user added successfully to database');
+        }
+        
+        aiUserAdded = true;
+    } catch (error) {
+        console.error('Error ensuring AI user exists:', error);
+    }
+}
+
 // Routes
 app.get('/', (req, res) => {
     res.render('index');
@@ -115,6 +183,9 @@ app.get('/', (req, res) => {
 app.get('/messages', async (req, res) => {
     try {
         console.log('Fetching messages from ClickHouse...');
+        
+        // Ensure AI user exists
+        await ensureAIUserExists();
         
         // First, check if table exists
         const tablesStream = await clickhouse.query({
@@ -149,10 +220,45 @@ io.on('connection', (socket) => {
     console.log('User connected:', socket.id);
     
     // Handle join chat
-    socket.on('join', (username) => {
+    socket.on('join', async (username) => {
         socket.username = username;
         console.log(`${username} joined the chat`);
+        
+        // Add user to connected users set
+        connectedUsers.add(username);
+        console.log('Connected users:', Array.from(connectedUsers));
+        
+        // Ensure AI user exists in database
+        await ensureAIUserExists();
+        
+        // Broadcast join message
         io.emit('user_joined', username);
+        
+        // If this is the only human user, have AI send a welcome message
+        if (connectedUsers.size === 1) {
+            setTimeout(async () => {
+                const welcomeMessage = `Hello ${username}! I'm the AI Assistant. Since you're the only one here, I'll respond to all your messages. If more users join, I'll only respond when you ask me directly.`;
+                
+                // Store AI message in database
+                const messageId = Math.floor(Math.random() * 1000000);
+                await clickhouse.command({
+                    query: `
+                        INSERT INTO default.messages (id, username, message)
+                        VALUES (${messageId}, '${AI_USERNAME}', '${welcomeMessage.replace(/'/g, "''")}')
+                    `
+                });
+                
+                // Send message to clients
+                io.emit('message', {
+                    username: AI_USERNAME,
+                    message: welcomeMessage,
+                    timestamp: new Date()
+                });
+                
+                // Refresh message history
+                io.emit('refresh_messages');
+            }, 1000);
+        }
     });
 
     // Handle sending messages
@@ -195,6 +301,42 @@ io.on('connection', (socket) => {
                 timestamp: new Date()
             });
 
+            // Process for AI response
+            setTimeout(async () => {
+                // Check if AI should respond
+                const shouldRespond = 
+                    // If there's only one human user, always respond
+                    connectedUsers.size === 1 || 
+                    // If message directly mentions AI
+                    message.toLowerCase().includes('ai') ||
+                    message.toLowerCase().includes('assistant') ||
+                    message.toLowerCase().includes('@ai');
+                
+                if (shouldRespond) {
+                    // Generate AI response
+                    const aiResponse = await generateAIResponse(message, socket.username);
+                    
+                    // Store AI response in database
+                    const aiMessageId = Math.floor(Math.random() * 1000000);
+                    await clickhouse.command({
+                        query: `
+                            INSERT INTO default.messages (id, username, message)
+                            VALUES (${aiMessageId}, '${AI_USERNAME}', '${aiResponse.replace(/'/g, "''")}')
+                        `
+                    });
+                    
+                    // Send AI response to all clients
+                    io.emit('message', {
+                        username: AI_USERNAME,
+                        message: aiResponse,
+                        timestamp: new Date()
+                    });
+                    
+                    // Refresh message history
+                    io.emit('refresh_messages');
+                }
+            }, 1000);
+
             // Refresh message history for all clients
             io.emit('refresh_messages');
         } catch (error) {
@@ -214,6 +356,11 @@ io.on('connection', (socket) => {
     socket.on('disconnect', () => {
         if (socket.username) {
             console.log(`${socket.username} left the chat`);
+            
+            // Remove user from connected users set
+            connectedUsers.delete(socket.username);
+            console.log('Connected users after disconnect:', Array.from(connectedUsers));
+            
             io.emit('user_left', socket.username);
         }
     });
